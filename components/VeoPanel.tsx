@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI } from '@google/genai';
-import { VEO_MODEL } from '../constants';
+import { VEO_MODELS, DEFAULT_VEO_MODEL_ID } from '../constants';
 import { MediaAsset, MediaType } from '../types';
 import { 
   Loader2, 
@@ -44,6 +44,7 @@ const PRESETS = [
 ];
 
 const STORAGE_KEY = 'rayality_user_api_key';
+const MODEL_STORAGE_KEY = 'rayality_veo_model';
 
 export const VeoPanel: React.FC<VeoPanelProps> = ({ onAssetGenerated }) => {
   const [apiKey, setApiKey] = useState<string>('');
@@ -55,6 +56,15 @@ export const VeoPanel: React.FC<VeoPanelProps> = ({ onAssetGenerated }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [status, setStatus] = useState<string>('');
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>('16:9');
+  const [veoModelId, setVeoModelId] = useState<string>(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem(MODEL_STORAGE_KEY) : null;
+    return saved && VEO_MODELS.some((m) => m.id === saved) ? saved : DEFAULT_VEO_MODEL_ID;
+  });
+
+  const handleSelectModel = (id: string) => {
+    setVeoModelId(id);
+    localStorage.setItem(MODEL_STORAGE_KEY, id);
+  };
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -136,14 +146,14 @@ export const VeoPanel: React.FC<VeoPanelProps> = ({ onAssetGenerated }) => {
       if (selectedImage) {
         const base64Data = await fileToBase64(selectedImage);
         operation = await ai.models.generateVideos({
-          model: VEO_MODEL,
+          model: veoModelId,
           prompt: prompt,
           image: { imageBytes: base64Data, mimeType: selectedImage.type },
           config: { numberOfVideos: 1, resolution: '720p', aspectRatio: aspectRatio }
         });
       } else {
         operation = await ai.models.generateVideos({
-          model: VEO_MODEL,
+          model: veoModelId,
           prompt: prompt,
           config: { numberOfVideos: 1, resolution: '720p', aspectRatio: aspectRatio }
         });
@@ -357,6 +367,34 @@ export const VeoPanel: React.FC<VeoPanelProps> = ({ onAssetGenerated }) => {
             </div>
           )}
           <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSelect} />
+        </section>
+
+        {/* Model Tier */}
+        <section className="bg-zinc-800/20 p-4 rounded-2xl border border-zinc-800 space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Model Tier</label>
+            <span className="text-[9px] text-zinc-600">est. cost / 8s clip</span>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {VEO_MODELS.map((m) => {
+              const active = veoModelId === m.id;
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => handleSelectModel(m.id)}
+                  disabled={isGenerating}
+                  className={`p-3 rounded-xl text-left transition-all border ${active ? 'bg-purple-500/15 border-purple-500/50 text-white shadow-inner' : 'bg-black/40 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'}`}
+                >
+                  <div className="text-[11px] font-bold tracking-tight">{m.label}</div>
+                  <div className="text-[9px] opacity-60 leading-tight mt-0.5">{m.tagline}</div>
+                  <div className={`text-[10px] font-mono mt-2 ${active ? 'text-purple-300' : 'text-zinc-500'}`}>{m.costPer8s}</div>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[9px] text-zinc-600 leading-relaxed">
+            Pricing approximate, charged on your own Gemini API key. Lite/Fast usually sufficient for projection texture loops; Quality preserves fine detail.
+          </p>
         </section>
 
         {/* Aspect Ratio */}
