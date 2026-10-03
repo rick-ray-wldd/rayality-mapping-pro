@@ -43,7 +43,7 @@ export const MediaPreviewModal: React.FC<MediaPreviewModalProps> = ({
             </button>
         </div>
         
-        <div className="flex-1 bg-black flex items-center justify-center overflow-hidden p-4 relative bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]">
+        <div className="flex-1 bg-black flex items-center justify-center overflow-hidden p-4 relative bg-zinc-950">
            {asset.type === MediaType.VIDEO || asset.type === MediaType.AI_GENERATED ? (
              <video 
                src={asset.url} 

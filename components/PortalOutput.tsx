@@ -1,49 +1,20 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ProjectState } from '../types';
-import { SurfaceRenderer } from './SurfaceRenderer';
+import { ProjectionStage } from './ProjectionStage';
 
-interface PortalOutputProps {
-  project: ProjectState;
-  windowObj: Window; // The PiP window object
-}
-
-export const PortalOutput: React.FC<PortalOutputProps> = ({ project, windowObj }) => {
-  
-  // Handle shortcuts specific to the PiP window
+export function PortalOutput({ project, windowObj }: { project: ProjectState; windowObj: Window }) {
+  const [blackout, setBlackout] = useState(false);
+  const [hideCursor, setHideCursor] = useState(false);
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() === 'f') {
-        // Fullscreen the PiP window itself (if supported by browser/OS specific behavior)
-        // Note: standard requestFullscreen might fail in PiP depending on browser policy
-        console.log("Toggle fullscreen requested");
-      }
+    const key = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === 'b') setBlackout(v => !v);
+      if (e.key.toLowerCase() === 'h') setHideCursor(v => !v);
     };
-
-    // We must attach listeners to the PiP window's document, not the main app's
-    windowObj.document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      windowObj.document.removeEventListener('keydown', handleKeyDown);
-    };
+    windowObj.addEventListener('keydown', key);
+    return () => windowObj.removeEventListener('keydown', key);
   }, [windowObj]);
-
-  return (
-    <div className="w-full h-full bg-black overflow-hidden relative">
-      {/* Rendering Stage */}
-      <div className="relative w-full h-full">
-         {project.surfaces.map(surface => {
-            if (!surface.visible) return null;
-            const media = project.mediaAssets.find(m => m.id === surface.mediaId);
-            return (
-              <SurfaceRenderer
-                key={surface.id}
-                surface={surface}
-                media={media}
-                isSelected={false} // No selection visual in output
-                readOnly={true} // Disable all interactions
-              />
-            );
-          })}
-      </div>
-    </div>
-  );
-};
+  return <div className="w-screen h-screen relative bg-black" style={{ cursor: hideCursor ? 'none' : 'auto' }}>
+    <ProjectionStage project={project} />
+    {blackout && <div className="absolute inset-0 bg-black z-[9999]" />}
+  </div>;
+}

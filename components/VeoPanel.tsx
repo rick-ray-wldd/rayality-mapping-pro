@@ -50,7 +50,7 @@ export const VeoPanel: React.FC<VeoPanelProps> = ({ onAssetGenerated }) => {
   const [apiKey, setApiKey] = useState<string>('');
   const [tempKey, setTempKey] = useState<string>('');
   const [isSettingKey, setIsSettingKey] = useState(false);
-  const [isVerifying, setIsVerifying] = useState(false);
+  const isVerifying = false;
   
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -69,41 +69,23 @@ export const VeoPanel: React.FC<VeoPanelProps> = ({ onAssetGenerated }) => {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Initialize: Load key from storage or environment
+  // Keys stay in this tab session; saving does not send a paid validation request.
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      setApiKey(saved);
-    } else if (process.env.API_KEY) {
-      // If server provides a fallback key
-      setApiKey(process.env.API_KEY);
-    }
+    localStorage.removeItem(STORAGE_KEY); // Remove legacy persistent credentials.
+    setApiKey(sessionStorage.getItem(STORAGE_KEY) || '');
   }, []);
 
-  const handleSaveKey = async () => {
-    if (tempKey.length < 20) return;
-    setIsVerifying(true);
-    setStatus('');
-    try {
-      // Minimal test call to verify key
-      const ai = new GoogleGenAI({ apiKey: tempKey });
-      await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: 'ping',
-      });
-      localStorage.setItem(STORAGE_KEY, tempKey);
-      setApiKey(tempKey);
-      setIsSettingKey(false);
-      setTempKey('');
-    } catch (e: any) {
-      setStatus(`Error: Key validation failed. ${e.message}`);
-    } finally {
-      setIsVerifying(false);
-    }
+  const handleSaveKey = () => {
+    const key = tempKey.trim();
+    if (key.length < 20) return;
+    sessionStorage.setItem(STORAGE_KEY, key);
+    setApiKey(key);
+    setIsSettingKey(false);
+    setTempKey('');
   };
 
   const handleClearKey = () => {
-    localStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(STORAGE_KEY);
     setApiKey('');
     setIsSettingKey(true);
   };
@@ -169,11 +151,12 @@ export const VeoPanel: React.FC<VeoPanelProps> = ({ onAssetGenerated }) => {
 
       if (operation.response?.generatedVideos?.[0]?.video?.uri) {
         const uri = operation.response.generatedVideos[0].video.uri;
-        const videoResponse = await fetch(`${uri}&key=${apiKey}`);
+        const videoResponse = await fetch((() => { const download = new URL(uri); download.searchParams.set('key', apiKey); return download.href; })());
+        if (!videoResponse.ok) throw new Error('Video download failed');
         const videoBlob = await videoResponse.blob();
         const localVideoUrl = URL.createObjectURL(videoBlob);
         
-        onAssetGenerated({ 
+        await onAssetGenerated({
           id: `veo-${Date.now()}`, 
           type: MediaType.AI_GENERATED, 
           url: localVideoUrl, 
@@ -182,8 +165,7 @@ export const VeoPanel: React.FC<VeoPanelProps> = ({ onAssetGenerated }) => {
         setStatus('Success! Texture added to library.');
       }
     } catch (e: any) {
-      console.error(e);
-      setStatus(`Error: ${e.message || 'Check your API Key and billing status.'}`);
+      setStatus('Error: Generation or download failed. Check your API key, billing, model availability and network.');
     } finally {
       setIsGenerating(false);
       setTimeout(() => { if (!isGenerating && !status.startsWith('Error')) setStatus(''); }, 5000);
@@ -200,7 +182,7 @@ export const VeoPanel: React.FC<VeoPanelProps> = ({ onAssetGenerated }) => {
           </div>
           <h2 className="text-2xl font-bold text-white mb-2 tracking-tight">AI Engine Setup</h2>
           <p className="text-zinc-400 text-sm leading-relaxed max-w-xs">
-            Unlock professional AI textures using the Google Veo generative model.
+            Optional paid Google Veo generation. Local mapping needs no key. Your key stays in this tab session; Generate sends your prompt and optional image to Google and may incur charges.
           </p>
         </div>
 
@@ -259,7 +241,7 @@ export const VeoPanel: React.FC<VeoPanelProps> = ({ onAssetGenerated }) => {
                   className="flex-[2] py-4 bg-white text-black hover:bg-zinc-200 rounded-2xl font-bold text-xs transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-xl shadow-white/5 active:scale-[0.98]"
                 >
                   {isVerifying ? <Loader2 size={16} className="animate-spin" /> : <ChevronRight size={16}/>}
-                  {isVerifying ? 'Verifying Key...' : 'Activate AI Engine'}
+                  {isVerifying ? 'Verifying Key...' : 'Save Key (no API request)'}
                 </button>
               </div>
             </div>

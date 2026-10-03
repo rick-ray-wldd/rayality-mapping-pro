@@ -28,3 +28,10 @@ dist-ssr
 CLAUDE.md
 DEPLOY_PLAN.md
 .playwright-mcp/
+
+AGENTS.md
+PERSONAL_ASSISTANT.local.md
+playwright-report/
+test-results/
+release/
+.env*

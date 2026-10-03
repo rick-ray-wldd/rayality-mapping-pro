@@ -134,12 +134,14 @@ export const SurfaceRenderer: React.FC<SurfaceRendererProps> = ({
               y: cy + (p.y - cy) * scale
             })) as [Point, Point, Point, Point];
             setLocalPoints(newPoints);
+            onUpdatePoints?.(surface.id, newPoints);
           }
         } 
         else {
           const newPoints = [...activePointsRef.current] as [Point, Point, Point, Point];
           newPoints[dragIndex] = currentPos;
           setLocalPoints(newPoints);
+          onUpdatePoints?.(surface.id, newPoints);
         }
       } 
       else if (draggingMode === 'body') {
@@ -152,16 +154,11 @@ export const SurfaceRenderer: React.FC<SurfaceRendererProps> = ({
         })) as [Point, Point, Point, Point];
         
         setLocalPoints(newPoints);
+        onUpdatePoints?.(surface.id, newPoints);
       }
     };
 
     const handleWindowMouseUp = () => {
-      if (onUpdatePoints) {
-        setLocalPoints((finalPoints) => {
-            onUpdatePoints(surface.id, finalPoints);
-            return finalPoints;
-        });
-      }
       setDraggingMode('none');
       setDragIndex(-1);
     };
@@ -233,6 +230,7 @@ export const SurfaceRenderer: React.FC<SurfaceRendererProps> = ({
     <div 
       className="absolute top-0 left-0 w-full h-full pointer-events-none"
       ref={containerRef}
+      data-surface-id={surface.id}
       style={{ zIndex: surface.zIndex }}
     >
       <div
@@ -280,7 +278,7 @@ export const SurfaceRenderer: React.FC<SurfaceRendererProps> = ({
           )
         ) : (
           <div className={`w-full h-full bg-zinc-800/80 flex items-center justify-center border border-zinc-600/50 ${readOnly ? 'opacity-0' : ''}`}>
-             <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/diagmonds-light.png')] opacity-10 pointer-events-none"></div>
+             <div className="absolute inset-0 bg-zinc-950 opacity-10 pointer-events-none"></div>
              {isSelected && !readOnly && <span className="text-cyan-400 font-mono font-bold text-4xl drop-shadow-md tracking-widest opacity-50 select-none">QUAD</span>}
           </div>
         )}

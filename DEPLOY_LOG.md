@@ -37,7 +37,7 @@
 ### Files changed
 
 - `Readme.md` — added Live Demo line at the top.
-- `CV.tex` (at `/Users/rick_sanchez/Documents/NTU/NTUCS_AI/CV.tex`) — appended Live Demo link next to the existing GitHub link in the "Rayality Mapping Pro" entry.
+- `CV.tex` (at an external résumé file) — appended Live Demo link next to the existing GitHub link in the "Rayality Mapping Pro" entry.
 - `DEPLOY_LOG.md` — this file.
 - `evidence/screenshots/prod_20260527.png` — full-page screenshot of production after creating Quad 1.
 
@@ -92,3 +92,23 @@
 1. When Veo 4 lands on the Gemini Developer API, add it to `VEO_MODELS` (one-line change).
 2. Optional: show a faint "$~est" disclaimer somewhere persistent — currently only inside the section's helper text.
 
+
+## 2026-10-03 — 0.1.0 productization
+
+- Removed build-time Gemini key substitution; fake-key bundle regression now passes.
+  The previous production JS and tracked history had no Google key-pattern match.
+- Added portable projects with embedded media, visible save status, upload error
+  handling, live geometry sync, aspect-correct output/PiP stage and storage fallback.
+- Built Tailwind locally, bundled the logo, replaced remote patterns, added original
+  calibration assets, bilingual guide, privacy/about pages and MIT/third-party notices.
+- Clean `npm ci`, `tsc --noEmit`/production build and five Playwright integration
+  tests passed on isolated Chromium. Tests include real corner drag, image/video
+  persistence, output scaling/sync, invalid import preservation and ads disabled.
+- Installed Chrome video-output validation timed out; isolated Chromium passed.
+  Real projector/PiP and paid Veo remain unverified; no paid model calls were made.
+- Production npm audit: 0 findings. Five development-only Tailwind3 glob/brace
+  findings remain; see docs/RELEASING.md. Main JS is ~558 KB / 138 KB gzip.
+- AdSense scaffold is disabled and guide-only. No publisher ID, approval or revenue.
+  Existing Vercel team verified as Hobby with no environment variables. Monetization
+  requires a suitable host/domain and owner account/CMP/payment setup.
+- Local evidence: evidence/screenshots/editor_20261003.png and output_20261003.png.

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ProjectState, SyncMessage } from '../types';
-import { SurfaceRenderer } from './SurfaceRenderer';
+import { ProjectionStage } from './ProjectionStage';
+import { getMediaBlob, SYNC_STORAGE_KEY } from '../storage';
 import { SYNC_CHANNEL_NAME } from '../constants';
 
 interface OutputViewProps {
@@ -13,28 +14,43 @@ export const OutputView: React.FC<OutputViewProps> = ({ onExit }) => {
   const [cursorHidden, setCursorHidden] = useState(false);
 
   useEffect(() => {
-    const channel = new BroadcastChannel(SYNC_CHANNEL_NAME);
-
-    const handleMessage = (event: MessageEvent<SyncMessage>) => {
-      const { type, payload } = event.data;
-      if (type === 'SYNC_STATE' && payload) {
-        setProject(payload);
-      }
+    const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(SYNC_CHANNEL_NAME) : null;
+    const urls = new Map<string, string>();
+    let revision = 0;
+    let closed = false;
+    const receive = async (payload: ProjectState) => {
+      const current = ++revision;
+      const assets = await Promise.all(payload.mediaAssets.map(async asset => {
+        if (!urls.has(asset.id)) {
+          const blob = await getMediaBlob(asset.id);
+          if (blob && !closed) urls.set(asset.id, URL.createObjectURL(blob));
+        }
+        return { ...asset, url: urls.get(asset.id) || '' };
+      }));
+      if (!closed && current === revision) setProject({ ...payload, mediaAssets: assets });
     };
-
-    channel.onmessage = handleMessage;
-
-    // Request initial state from editor
-    channel.postMessage({ type: 'REQUEST_STATE' });
-
-    // Start heartbeat
-    const heartbeatInterval = setInterval(() => {
-      channel.postMessage({ type: 'HEARTBEAT' });
-    }, 2000);
-
+    const readBackup = () => {
+      try {
+        const saved = localStorage.getItem(SYNC_STORAGE_KEY);
+        if (saved) void receive(JSON.parse(saved)).catch(console.error);
+      } catch { /* Editor may not have published yet. */ }
+    };
+    if (channel) {
+      channel.onmessage = (event: MessageEvent<SyncMessage>) => {
+        if (event.data.type === 'SYNC_STATE' && event.data.payload) void receive(event.data.payload).catch(console.error);
+      };
+      channel.postMessage({ type: 'REQUEST_STATE' });
+    }
+    const onStorage = (event: StorageEvent) => { if (event.key === SYNC_STORAGE_KEY) readBackup(); };
+    window.addEventListener('storage', onStorage);
+    readBackup();
+    const heartbeatInterval = setInterval(() => channel?.postMessage({ type: 'HEARTBEAT' }), 2000);
     return () => {
-      channel.close();
+      closed = true;
+      channel?.close();
       clearInterval(heartbeatInterval);
+      window.removeEventListener('storage', onStorage);
+      urls.forEach(url => URL.revokeObjectURL(url));
     };
   }, []);
 
@@ -101,22 +117,7 @@ export const OutputView: React.FC<OutputViewProps> = ({ onExit }) => {
         className={`absolute inset-0 bg-black z-[9999] transition-opacity duration-500 pointer-events-none ${blackout ? 'opacity-100' : 'opacity-0'}`}
       />
 
-      {/* Rendering Stage */}
-      <div className="relative w-full h-full">
-         {project.surfaces.map(surface => {
-            if (!surface.visible) return null;
-            const media = project.mediaAssets.find(m => m.id === surface.mediaId);
-            return (
-              <SurfaceRenderer
-                key={surface.id}
-                surface={surface}
-                media={media}
-                isSelected={false} // No selection visual in output
-                readOnly={true} // Disable all interactions
-              />
-            );
-          })}
-      </div>
+      <ProjectionStage project={project} />
     </div>
   );
 };

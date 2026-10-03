@@ -23,19 +23,19 @@ export const VEO_MODELS: VeoModelOption[] = [
     id: 'veo-3.1-lite-generate-preview',
     label: 'Lite',
     tagline: 'Cheapest — fast drafts',
-    costPer8s: '~$0.24',
+    costPer8s: 'Paid · check current pricing',
   },
   {
     id: 'veo-3.1-fast-generate-preview',
     label: 'Fast',
     tagline: 'Balanced — recommended',
-    costPer8s: '~$1.20',
+    costPer8s: 'Paid · check current pricing',
   },
   {
     id: 'veo-3.1-generate-preview',
     label: 'Quality',
     tagline: 'Highest fidelity',
-    costPer8s: '~$3.20',
+    costPer8s: 'Paid · check current pricing',
   },
 ];
 

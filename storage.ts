@@ -35,8 +35,8 @@ export async function saveMediaBlob(id: string, blob: Blob): Promise<void> {
     const tx = db.transaction(STORE_MEDIA, 'readwrite');
     const store = tx.objectStore(STORE_MEDIA);
     store.put(blob, id);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
   });
 }
 
@@ -46,7 +46,7 @@ export async function getMediaBlob(id: string): Promise<Blob | undefined> {
     const tx = db.transaction(STORE_MEDIA, 'readonly');
     const store = tx.objectStore(STORE_MEDIA);
     const request = store.get(id);
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => { db.close(); resolve(request.result); };
     request.onerror = () => reject(request.error);
   });
 }
@@ -57,8 +57,8 @@ export async function deleteMediaBlob(id: string): Promise<void> {
     const tx = db.transaction(STORE_MEDIA, 'readwrite');
     const store = tx.objectStore(STORE_MEDIA);
     store.delete(id);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
   });
 }
 
@@ -81,8 +81,8 @@ export async function saveProjectState(state: ProjectState): Promise<void> {
     };
 
     store.put(stateToSave, 'currentProject');
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
   });
 }
 
@@ -92,7 +92,7 @@ export async function getProjectState(): Promise<ProjectState | undefined> {
     const tx = db.transaction(STORE_PROJECT, 'readonly');
     const store = tx.objectStore(STORE_PROJECT);
     const request = store.get('currentProject');
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => { db.close(); resolve(request.result); };
     request.onerror = () => reject(request.error);
   });
 }
@@ -123,8 +123,7 @@ export async function loadFullProject(): Promise<ProjectState | null> {
       mediaAssets: rehydratedAssets
     };
   } catch (e) {
-    console.error("Failed to load project", e);
-    return null;
+    throw e;
   }
 }
 
@@ -142,4 +141,16 @@ export function writeSyncState(state: ProjectState) {
   } catch (e) {
     console.warn("Sync storage write failed", e);
   }
+}
+/** Commit a portable project and its media atomically. */
+export async function importProjectState(project: ProjectState, blobs: Map<string, Blob>): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_MEDIA, STORE_PROJECT], 'readwrite');
+    blobs.forEach((blob, id) => tx.objectStore(STORE_MEDIA).put(blob, id));
+    tx.objectStore(STORE_PROJECT).put(project, 'currentProject');
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+    tx.onabort = () => { db.close(); reject(tx.error || new Error('Import aborted')); };
+  });
 }

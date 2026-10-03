@@ -1,3 +1,6 @@
+import logoUrl from './Rayality_logo.png';
+import { exportProject, readProjectFile } from './projectFile';
+import { importProjectState } from './storage';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -73,6 +76,7 @@ export const App: React.FC = () => {
   const [isOutputMode, setIsOutputMode] = useState(false);
   const [isAppLoading, setIsAppLoading] = useState(true);
   const [isInIframe, setIsInIframe] = useState(false);
+  const [storageReady, setStorageReady] = useState(true);
 
   useEffect(() => {
     try {
@@ -102,7 +106,9 @@ export const App: React.FC = () => {
       const savedProject = await loadFullProject();
       if (savedProject) setProject(savedProject);
     } catch (e) {
-      console.error("Error loading saved project:", e);
+      setStorageReady(false);
+      setSaveStatus('Local storage unavailable — export a backup');
+      setProjectError("Could not load local project. Check browser storage permissions before editing.");
     } finally {
       setIsAppLoading(false);
     }
@@ -115,6 +121,9 @@ export const App: React.FC = () => {
     canvasSize: { width: DEFAULT_CANVAS_WIDTH, height: DEFAULT_CANVAS_HEIGHT },
   });
 
+  const [saveStatus, setSaveStatus] = useState('Saved locally');
+  const [projectError, setProjectError] = useState('');
+  const [fileBusy, setFileBusy] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
   const [zoom, setZoom] = useState(0.6); 
   const [activeTab, setActiveTab] = useState<'layers' | 'media' | 'veo' | 'edit'>('layers');
@@ -130,6 +139,8 @@ export const App: React.FC = () => {
   const [pipWindow, setPipWindow] = useState<Window | null>(null);
   
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
+  const projectRef = useRef(project);
+  projectRef.current = project;
   const lastHeartbeatRef = useRef<number>(0);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -138,23 +149,24 @@ export const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (isOutputMode || isAppLoading) return;
+    if (isOutputMode || isAppLoading || !storageReady) return;
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    setSaveStatus('Saving…');
     autoSaveTimerRef.current = setTimeout(() => {
-      saveProjectState(project).catch(err => console.error("Auto-save failed:", err));
+      saveProjectState(project).then(() => setSaveStatus('Saved locally')).catch(() => setSaveStatus('Save failed — export a backup'));
     }, 1000);
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
-  }, [project, isOutputMode, isAppLoading]);
+  }, [project, isOutputMode, isAppLoading, storageReady]);
 
   useEffect(() => {
-    if (isOutputMode) return;
+    if (isOutputMode || isAppLoading || typeof BroadcastChannel === 'undefined') return;
     const channel = new BroadcastChannel(SYNC_CHANNEL_NAME);
     broadcastChannelRef.current = channel;
     channel.onmessage = (event: MessageEvent<SyncMessage>) => {
       const { type } = event.data;
       if (type === 'REQUEST_STATE') {
-        channel.postMessage({ type: 'SYNC_STATE', payload: project });
-        writeSyncState(project);
+        channel.postMessage({ type: 'SYNC_STATE', payload: projectRef.current });
+        writeSyncState(projectRef.current);
       } else if (type === 'HEARTBEAT') {
         lastHeartbeatRef.current = Date.now();
         setOutputConnected(true);
@@ -164,13 +176,13 @@ export const App: React.FC = () => {
       if (Date.now() - lastHeartbeatRef.current > 4000) setOutputConnected(false);
     }, 1000);
     return () => { channel.close(); clearInterval(monitorInterval); };
-  }, [isOutputMode, project]);
+  }, [isOutputMode, isAppLoading]);
 
   useEffect(() => {
-    if (isOutputMode || !broadcastChannelRef.current) return;
-    broadcastChannelRef.current.postMessage({ type: 'SYNC_STATE', payload: project });
+    if (isOutputMode || isAppLoading) return;
+    broadcastChannelRef.current?.postMessage({ type: 'SYNC_STATE', payload: project });
     writeSyncState(project);
-  }, [project, isOutputMode]);
+  }, [project, isOutputMode, isAppLoading]);
 
   const getOutputUrl = () => {
     const currentHref = window.location.href;
@@ -266,20 +278,65 @@ export const App: React.FC = () => {
   const updateSurfaceProp = (id: string, prop: keyof Surface, value: any) => setProject((prev) => ({ ...prev, surfaces: prev.surfaces.map((s) => (s.id === id ? { ...s, [prop]: value } : s)) }));
   const moveLayer = (fromIndex: number, toIndex: number) => { const newSurfaces = [...project.surfaces]; const [moved] = newSurfaces.splice(fromIndex, 1); newSurfaces.splice(toIndex, 0, moved); const updated = newSurfaces.map((s, i) => ({ ...s, zIndex: i + 1 })); setProject(prev => ({ ...prev, surfaces: updated })); };
   
+  const importMedia = async (files: File[]) => {
+    setProjectError('');
+    for (const file of files) {
+      if (!/^(image\/(png|jpeg|gif|webp|svg\+xml)|video\/(mp4|webm|ogg))$/.test(file.type)) {
+        setProjectError(`Unsupported file: ${file.name}`); continue;
+      }
+      try {
+        const id = crypto.randomUUID();
+        await saveMediaBlob(id, file);
+        const asset: MediaAsset = { id, type: file.type.startsWith('video') ? MediaType.VIDEO : MediaType.IMAGE,
+          url: URL.createObjectURL(file), name: file.name };
+        setProject(prev => ({ ...prev, mediaAssets: [...prev.mediaAssets, asset] }));
+      } catch { setProjectError(`Could not store ${file.name}. Check available browser storage.`); }
+    }
+  };
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files; if (!files) return;
-    Array.from(files).forEach(async (file: File) => {
-      const url = URL.createObjectURL(file); const type = file.type.startsWith('video') ? MediaType.VIDEO : MediaType.IMAGE; const id = `media-${Date.now()}-${Math.random()}`; const asset: MediaAsset = { id, type, url, name: file.name };
-      try { await saveMediaBlob(id, file); } catch (err) { console.error(err); }
-      setProject(prev => ({ ...prev, mediaAssets: [...prev.mediaAssets, asset] }));
-    });
+    void importMedia(Array.from(e.target.files || []));
+    e.target.value = '';
+  };
+  const downloadProject = async () => {
+    setFileBusy(true); setProjectError('');
+    try {
+      const blob = await exportProject(project);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url; link.download = 'rayality-project.json'; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) { setProjectError((e as Error).message); }
+    finally { setFileBusy(false); }
+  };
+  const openProject = async (file?: File) => {
+    if (!file) return;
+    if (!window.confirm('Replace the current project? Export a backup first if needed.')) return;
+    setFileBusy(true); setProjectError('');
+    try {
+      const imported = await readProjectFile(file);
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+      await importProjectState(imported.project, imported.blobs);
+      const loaded = await loadFullProject();
+      if (loaded) { setProject(loaded); setStorageReady(true); }
+    } catch (e) { setProjectError(`Import failed: ${(e as Error).message}`); }
+    finally { setFileBusy(false); }
+  };
+  const loadSample = async () => {
+    const response = await fetch('./samples/calibration.svg');
+    if (!response.ok) { setProjectError('Could not load calibration sample.'); return; }
+    await importMedia([new File([await response.blob()], 'calibration.svg', { type: 'image/svg+xml' })]);
   };
   const addVeoAsset = async (asset: MediaAsset) => {
-    try { const response = await fetch(asset.url); const blob = await response.blob(); await saveMediaBlob(asset.id, blob); } catch (err) { console.error(err); }
+    const response = await fetch(asset.url);
+    if (!response.ok) throw new Error('Media download failed');
+    const blob = await response.blob();
+    await saveMediaBlob(asset.id, blob);
     setProject(prev => ({ ...prev, mediaAssets: [...prev.mediaAssets, asset] })); setActiveTab('media'); setPreviewAsset(asset);
   };
   const assignMediaToSurface = (surfaceId: string, mediaId: string) => updateSurfaceProp(surfaceId, 'mediaId', mediaId);
   const handleTransform = (type: 'translate' | 'scale' | 'rotate', values: any) => {
+    if (Object.values(values).some(v => typeof v !== 'number' || !Number.isFinite(v))) return;
+    if (type === 'scale' && Object.values(values).some(v => Number(v) <= 0)) return;
     if (!project.selectedSurfaceId) return; const surface = project.surfaces.find(s => s.id === project.selectedSurfaceId); if (!surface) return;
     let newPoints = surface.points; const centroid = getCentroid(surface.points); const bbox = getBoundingBox(surface.points);
     if (type === 'translate') newPoints = translatePoints(surface.points, (values.x !== undefined ? values.x : bbox.x) - bbox.x, (values.y !== undefined ? values.y : bbox.y) - bbox.y);
@@ -294,7 +351,7 @@ export const App: React.FC = () => {
     setEditingAssetId(null); setActiveTab('media');
   };
 
-  if (isOutputMode) return <OutputView onExit={() => setIsOutputMode(false)} />;
+  if (isOutputMode) return <OutputView onExit={() => { window.location.href = window.location.pathname; }} />;
   if (isAppLoading) return <div className="h-screen w-screen bg-black flex flex-col items-center justify-center text-zinc-500 gap-4"><Loader2 className="animate-spin text-cyan-500" size={48} /><div className="text-sm font-mono tracking-widest">LOADING PROJECT...</div></div>;
 
   const selectedSurface = project.surfaces.find(s => s.id === project.selectedSurfaceId);
@@ -352,10 +409,13 @@ export const App: React.FC = () => {
 
       <header className="flex items-center justify-between px-4 py-3 bg-zinc-900 border-b border-zinc-800 z-50">
         <div className="flex items-center gap-3">
-          <div className="h-14 flex items-center justify-center shrink-0"><img src="./Rayality_logo.png" alt="Rayality" className="h-full w-auto object-contain" /></div>
+          <div className="h-14 flex items-center justify-center shrink-0"><img src={logoUrl} alt="Rayality" className="h-full w-auto object-contain" /></div>
           <h1 className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">Rayality Mapping <span className="text-cyan-400 font-light">Pro</span></h1>
         </div>
         <div className="flex items-center gap-4">
+           <button disabled={fileBusy} onClick={downloadProject} className="text-xs text-cyan-400">Export Project</button>
+           <label className="text-xs text-cyan-400 cursor-pointer">Import Project<input aria-label="Import Project" type="file" accept=".json" className="hidden" disabled={fileBusy} onChange={e => { void openProject(e.target.files?.[0]); e.target.value = ''; }} /></label>
+           <a href="./guide.html" target="_blank" rel="noopener" className="text-xs text-cyan-400">Guide</a>
            {pipWindow && <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-full border border-cyan-900 bg-cyan-900/20 text-cyan-400 animate-pulse"><PictureInPicture2 size={12} /><span>PiP Active</span></div>}
            <div className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-full border ${outputConnected ? 'border-green-900 bg-green-900/20 text-green-400' : 'border-zinc-700 bg-zinc-800 text-zinc-500'}`}>{outputConnected ? <Wifi size={12} /> : <WifiOff size={12} />}<span>{outputConnected ? 'Output Connected' : 'Output Offline'}</span></div>
            <div className="flex bg-zinc-800 rounded-lg p-1 border border-zinc-700">
@@ -367,17 +427,19 @@ export const App: React.FC = () => {
         </div>
       </header>
 
+      <div role="status" className="px-4 py-1 text-xs bg-zinc-900 text-zinc-400">{saveStatus} · Export a backup before clearing browser data. <a href="./privacy.html" target="_blank" rel="noopener" className="text-cyan-400">Privacy</a></div>
+      {projectError && <div role="alert" className="bg-red-950 text-red-200 px-4 py-2 text-sm">{projectError}<button className="ml-4 underline" onClick={() => setProjectError('')}>Dismiss</button></div>}
       <div className="flex flex-1 overflow-hidden">
         <div className="w-16 bg-zinc-900 border-r border-zinc-800 flex flex-col items-center py-4 gap-4 z-40">
-          <button onClick={() => setActiveTab('layers')} className={`p-3 rounded-xl transition-all ${activeTab === 'layers' ? 'bg-zinc-800 text-cyan-400 shadow-inner' : 'text-zinc-500 hover:text-zinc-300'}`}><Layers size={24} /></button>
-          <button onClick={() => setActiveTab('media')} className={`p-3 rounded-xl transition-all ${activeTab === 'media' ? 'bg-zinc-800 text-cyan-400 shadow-inner' : 'text-zinc-500 hover:text-zinc-300'}`}><Monitor size={24} /></button>
-          <button onClick={() => setActiveTab('edit')} className={`p-3 rounded-xl transition-all ${activeTab === 'edit' ? 'bg-zinc-800 text-green-400 shadow-inner' : 'text-zinc-500 hover:text-zinc-300'}`}><Scissors size={24} /></button>
+          <button aria-label="Layers" onClick={() => setActiveTab('layers')} className={`p-3 rounded-xl transition-all ${activeTab === 'layers' ? 'bg-zinc-800 text-cyan-400 shadow-inner' : 'text-zinc-500 hover:text-zinc-300'}`}><Layers size={24} /></button>
+          <button aria-label="Media" onClick={() => setActiveTab('media')} className={`p-3 rounded-xl transition-all ${activeTab === 'media' ? 'bg-zinc-800 text-cyan-400 shadow-inner' : 'text-zinc-500 hover:text-zinc-300'}`}><Monitor size={24} /></button>
+          <button aria-label="Edit media" onClick={() => setActiveTab('edit')} className={`p-3 rounded-xl transition-all ${activeTab === 'edit' ? 'bg-zinc-800 text-green-400 shadow-inner' : 'text-zinc-500 hover:text-zinc-300'}`}><Scissors size={24} /></button>
           <div className="h-px w-8 bg-zinc-800 my-2"></div>
-          <button onClick={() => setActiveTab('veo')} className={`p-3 rounded-xl transition-all ${activeTab === 'veo' ? 'bg-zinc-800 text-purple-400 shadow-inner' : 'text-zinc-500 hover:text-zinc-300'}`}><Sparkles size={24} /></button>
+          <button aria-label="AI" onClick={() => setActiveTab('veo')} className={`p-3 rounded-xl transition-all ${activeTab === 'veo' ? 'bg-zinc-800 text-purple-400 shadow-inner' : 'text-zinc-500 hover:text-zinc-300'}`}><Sparkles size={24} /></button>
           
           <div className="mt-auto mb-4 flex flex-col items-center gap-3">
              <a 
-               href="https://hackmd.io/@allcare561110/H117LnMzZe"
+               href="./guide.html"
                target="_blank"
                rel="noopener noreferrer"
                className="p-3 rounded-xl text-zinc-500 hover:text-cyan-400 hover:bg-zinc-800 transition-all"
@@ -432,10 +494,10 @@ export const App: React.FC = () => {
           {activeTab === 'media' && (
             <div className="flex flex-col h-full">
               <div className="p-4 border-b border-zinc-800">
-                <h2 className="font-bold text-zinc-300 mb-4">Media Library</h2>
-                <label className="flex items-center justify-center w-full p-6 border-2 border-dashed border-zinc-700 rounded-lg cursor-pointer hover:bg-zinc-800 hover:border-zinc-500 transition-all group">
+                <h2 className="font-bold text-zinc-300 mb-4">Media Library</h2><button className="text-xs text-cyan-400 mb-3" onClick={() => void loadSample().catch(() => setProjectError('Sample unavailable'))}>Load Calibration Sample</button>
+                <label onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); void importMedia(Array.from(e.dataTransfer.files)); }} className="flex items-center justify-center w-full p-6 border-2 border-dashed border-zinc-700 rounded-lg cursor-pointer hover:bg-zinc-800 hover:border-zinc-500 transition-all group">
                   <div className="flex flex-col items-center gap-2"><Upload size={24} className="text-zinc-500 group-hover:text-cyan-400" /><span className="text-xs font-medium text-zinc-400">Drop Video / Image</span></div>
-                  <input type="file" className="hidden" multiple accept="video/*,image/*" onChange={handleFileUpload} />
+                  <input aria-label="Upload media" type="file" className="hidden" multiple accept="video/*,image/*" onChange={handleFileUpload} />
                 </label>
               </div>
               <div className="flex-1 overflow-y-auto p-3 grid grid-cols-2 gap-3 content-start">
@@ -443,7 +505,7 @@ export const App: React.FC = () => {
                    <div key={asset.id} draggable onDragStart={(e) => e.dataTransfer.setData('mediaId', asset.id)} className={`relative aspect-video bg-black rounded-lg overflow-hidden border border-zinc-800 group transition-all ${project.selectedSurfaceId ? 'cursor-alias hover:border-cyan-500' : 'cursor-default'}`}>
                       {asset.type !== MediaType.IMAGE ? (<video src={asset.url} className="w-full h-full object-cover" muted loop onMouseOver={e => e.currentTarget.play().catch(console.error)} onMouseOut={e => { e.currentTarget.pause(); e.currentTarget.currentTime = 0; }} />) : (<img src={asset.url} alt={asset.name} className="w-full h-full object-cover" />)}
                       <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-2 transition-opacity z-10">
-                         {project.selectedSurfaceId && (<button onClick={(e) => { e.stopPropagation(); assignMediaToSurface(project.selectedSurfaceId!, asset.id); }} className="bg-cyan-600 text-white p-1.5 rounded hover:bg-cyan-500"><CheckCircle2 size={16} /></button>)}
+                         {project.selectedSurfaceId && (<button aria-label={`Assign ${asset.name}`} onClick={(e) => { e.stopPropagation(); assignMediaToSurface(project.selectedSurfaceId!, asset.id); }} className="bg-cyan-600 text-white p-1.5 rounded hover:bg-cyan-500"><CheckCircle2 size={16} /></button>)}
                          <button onClick={(e) => { e.stopPropagation(); setPreviewAsset(asset); }} className="bg-zinc-700 text-white p-1.5 rounded hover:bg-zinc-600"><Eye size={16} /></button>
                          <button onClick={(e) => { e.stopPropagation(); handleEditAsset(asset.id); }} className="bg-green-700 text-white p-1.5 rounded hover:bg-green-600"><Scissors size={16} /></button>
                       </div>
@@ -478,10 +540,10 @@ export const App: React.FC = () => {
               <div className="space-y-3">
                  <h3 className="text-xs font-bold text-zinc-500 uppercase flex items-center gap-2"><Move size={12} /> Transform</h3>
                  <div className="grid grid-cols-2 gap-2">
-                   <div className="bg-zinc-800 p-2 rounded"><label className="text-[10px] text-zinc-500 uppercase block mb-1">X</label><input type="number" value={Math.round(selectedBBox.x)} onChange={(e) => handleTransform('translate', { x: parseInt(e.target.value) })} className="w-full bg-transparent text-sm text-white focus:outline-none" /></div>
-                   <div className="bg-zinc-800 p-2 rounded"><label className="text-[10px] text-zinc-500 uppercase block mb-1">Y</label><input type="number" value={Math.round(selectedBBox.y)} onChange={(e) => handleTransform('translate', { y: parseInt(e.target.value) })} className="w-full bg-transparent text-sm text-white focus:outline-none" /></div>
-                   <div className="bg-zinc-800 p-2 rounded"><label className="text-[10px] text-zinc-500 uppercase block mb-1">Width</label><input type="number" value={Math.round(selectedBBox.width)} onChange={(e) => handleTransform('scale', { width: parseInt(e.target.value) })} className="w-full bg-transparent text-sm text-white focus:outline-none" /></div>
-                   <div className="bg-zinc-800 p-2 rounded"><label className="text-[10px] text-zinc-500 uppercase block mb-1">Height</label><input type="number" value={Math.round(selectedBBox.height)} onChange={(e) => handleTransform('scale', { height: parseInt(e.target.value) })} className="w-full bg-transparent text-sm text-white focus:outline-none" /></div>
+                   <div className="bg-zinc-800 p-2 rounded"><label className="text-[10px] text-zinc-500 uppercase block mb-1">X</label><input aria-label="X" type="number" value={Math.round(selectedBBox.x)} onChange={(e) => handleTransform('translate', { x: parseInt(e.target.value) })} className="w-full bg-transparent text-sm text-white focus:outline-none" /></div>
+                   <div className="bg-zinc-800 p-2 rounded"><label className="text-[10px] text-zinc-500 uppercase block mb-1">Y</label><input aria-label="Y" type="number" value={Math.round(selectedBBox.y)} onChange={(e) => handleTransform('translate', { y: parseInt(e.target.value) })} className="w-full bg-transparent text-sm text-white focus:outline-none" /></div>
+                   <div className="bg-zinc-800 p-2 rounded"><label className="text-[10px] text-zinc-500 uppercase block mb-1">Width</label><input aria-label="Width" type="number" value={Math.round(selectedBBox.width)} onChange={(e) => handleTransform('scale', { width: parseInt(e.target.value) })} className="w-full bg-transparent text-sm text-white focus:outline-none" /></div>
+                   <div className="bg-zinc-800 p-2 rounded"><label className="text-[10px] text-zinc-500 uppercase block mb-1">Height</label><input aria-label="Height" type="number" value={Math.round(selectedBBox.height)} onChange={(e) => handleTransform('scale', { height: parseInt(e.target.value) })} className="w-full bg-transparent text-sm text-white focus:outline-none" /></div>
                  </div>
                  <div className="bg-zinc-800 p-3 rounded flex items-center gap-3">
                     <span className="text-xs text-zinc-400 w-16">Rotation</span>
