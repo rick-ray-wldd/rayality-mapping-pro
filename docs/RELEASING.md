@@ -16,7 +16,7 @@
    LICENSE/README and notices, with fixed archive timestamps.
    Never archive the whole checkout: it contains ignored local credentials.
 5. For the existing Vercel project use the already authenticated CLI. Prefer
-   an explicit `.vercelignore` allowlist to keep uploads limited to public code.
+   the explicit `.vercelignore` exclusions to keep uploads limited to public code.
    `vercel --prod --yes` updates the existing site; do not create or upgrade a
    plan or add build-time API keys. Keep ads off on Hobby.
 6. Check the production HTTPS URL without authentication. Fetch its actual JS
