@@ -112,3 +112,25 @@
   Existing Vercel team verified as Hobby with no environment variables. Monetization
   requires a suitable host/domain and owner account/CMP/payment setup.
 - Local evidence: evidence/screenshots/editor_20261003.png and output_20261003.png.
+
+### Production verification
+
+- Source deployment commit: `3ebefb7` (application code: `0e314ba`).
+- Deployment: `dpl_7myPnvEQiF6SAbUdUYMpNYF4X51g`.
+- Alias: https://rayality-mapping-pro.vercel.app
+- Inspector: https://vercel.com/allcarerickray-7044s-projects/rayality-mapping-pro/7myPnvEQiF6SAbUdUYMpNYF4X51g
+- Initial CLI deployment failed because the include-only ignore rules omitted
+  component directories. Explicit private-file exclusions fixed the upload;
+  the next deployment completed successfully without changing application code.
+- Anonymous HTTPS 200: editor, guide, privacy, about, favicon, both samples,
+  third-party notice and disabled ad configuration.
+- Served `/assets/index-CcaRiAwO.js` exactly matches the local build; SHA-256:
+  `590361e83e11cfd4ef9415ba2512e24993908d69bbcae1cbb85bf6880190b00d`.
+- All five integration tests passed again against the public alias in a fresh
+  Chromium context (3.0 minutes). No paid API requests or account login used.
+- Production screenshots: `evidence/screenshots/editor_production_20261003.png`
+  and `evidence/screenshots/output_production_20261003.png`.
+- Static release ZIP: 20 public files, 371577 bytes; SHA-256:
+  `ac30bd01105c700904645efbcfa90c97a20ee0d0372fc73bc11cb3ad29d70531`.
+- Advertising remains off. This deployment is the ad-free open-source tool;
+  monetization prerequisites remain listed in docs/MONETIZATION.md.
